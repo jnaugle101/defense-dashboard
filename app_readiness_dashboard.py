@@ -19,6 +19,51 @@ try:
 except Exception:
     HAVE_PYCOUNTRY = False
 
+# top of file
+import pandas as pd, plotly.express as px, streamlit as st
+from data_sources import REGISTRY, load_selected
+
+st.sidebar.header("Data sources")
+choices = st.sidebar.multiselect(
+    "Choose sources to load",
+    options=list(REGISTRY.keys()),
+    default=["World Bank: mil exp %GDP", "UN Peacekeeping: contributors", "USAspending: DoD obligations"],
+)
+
+df = load_selected(choices)
+
+st.subheader("Combined dataset (preview)")
+st.dataframe(df.head(50))
+
+# Example chart: military exp % GDP (World Bank)
+wb = df[df["metric"] == "Military Expenditure (% GDP)"]
+if not wb.empty:
+    countries = st.multiselect("Countries", sorted(wb["country"].dropna().unique()), default=["United States"])
+    m = wb[wb["country"].isin(countries)]
+    fig = px.line(m, x="year", y="value", color="country",
+                  labels={"value":"% of GDP","year":"Year"},
+                  title="Military Expenditure as % of GDP (World Bank)")
+    st.plotly_chart(fig, use_container_width=True)
+
+# Example chart: UN PKO contributors (top N latest year)
+unpk = df[df["metric"] == "Troops contributed to UN PKO"]
+if not unpk.empty:
+    latest = unpk["year"].dropna().max()
+    topn = (unpk[unpk["year"] == latest]
+            .nlargest(15, "value"))
+    fig2 = px.bar(topn, x="value", y="country", orientation="h",
+                  labels={"value":"Troops","country":""},
+                  title=f"Top UN Peacekeeping Troop Contributors — {int(latest)}")
+    st.plotly_chart(fig2, use_container_width=True)
+
+# Example chart: USAspending DoD obligations
+dod = df[df["metric"] == "DoD Obligations"]
+if not dod.empty:
+    fig3 = px.line(dod.sort_values("year"), x="year", y="value",
+                   title="USAspending: DoD Obligations by Fiscal Year",
+                   labels={"value":"USD","year":"FY"})
+    st.plotly_chart(fig3, use_container_width=True)
+
 APP_TITLE = "🛡️ Military Readiness Dashboard (Budget • Deployments • Installations)"
 
 # -------------------------
