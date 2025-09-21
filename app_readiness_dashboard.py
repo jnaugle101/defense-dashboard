@@ -11,6 +11,8 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+
+
 # Optional ISO mapping for choropleth
 try:
     import pycountry
@@ -40,6 +42,31 @@ df = load_selected(choices)
 st.title(APP_TITLE)
 st.subheader("Combined dataset (preview)")
 st.dataframe(df.head(50), use_container_width=True)
+
+
+from data_sources import REGISTRY, load_selected
+
+st.sidebar.header("Data sources")
+choices = st.sidebar.multiselect(
+    "Choose sources to load",
+    options=list(REGISTRY.keys()),
+    default=["World Bank: mil exp %GDP", "UN Peacekeeping: contributors", "USAspending: DoD obligations"],
+)
+df = load_selected(choices)
+
+st.subheader("Combined dataset (preview)")
+st.dataframe(df.head(50), use_container_width=True)
+
+# Example charts
+wb = df[df["metric"] == "Military Expenditure (% GDP)"]
+if not wb.empty:
+    countries = st.multiselect("Countries", sorted(wb["country"].dropna().unique()), default=["United States"])
+    m = wb[wb["country"].isin(countries)]
+    fig = px.line(m, x="year", y="value", color="country",
+                  labels={"value": "% of GDP", "year": "Year"},
+                  title="Military Expenditure as % of GDP (World Bank)")
+    st.plotly_chart(fig, use_container_width=True)
+
 
 # Example chart: military exp % GDP (World Bank)
 wb = df[df["metric"] == "Military Expenditure (% GDP)"]
