@@ -16,13 +16,15 @@ except Exception:
 UA = {"User-Agent": "ReadinessDashboard/1.0 (+contact)"}
 TIMEOUT = 30
 
-# ---------- World Bank: Military expenditure % of GDP ----------
-@cache
-def wb_milex_percent_gdp(countries="all", start=1990, end=datetime.now().year) -> pd.DataFrame:
+
+# ---------- Helpers ----------
+def _wb_indicator_to_df(code: str, countries="all", start=1990, end=None,
+                        metric_name: str = "", unit: str = "") -> pd.DataFrame:
     """
-    https://api.worldbank.org/v2/country/{id}/indicator/MS.MIL.XPND.GD.ZS?format=json&per_page=20000&date=YYYY:YYYY
+    Generic World Bank indicator fetcher -> tidy DF.
     """
-    code = "MS.MIL.XPND.GD.ZS"
+    if end is None:
+        end = datetime.now().year
     url = (
         f"https://api.worldbank.org/v2/country/{countries}/indicator/{code}"
         f"?format=json&per_page=20000&date={start}:{end}"
@@ -39,17 +41,17 @@ def wb_milex_percent_gdp(countries="all", start=1990, end=datetime.now().year) -
 
     rows = []
     for rec in data[1]:
-        if rec.get("value") is None:
+        val = rec.get("value")
+        if val is None:
             continue
         rows.append(
             {
                 "source": "World Bank",
                 "country": rec.get("country", {}).get("value"),
-                "iso3": rec.get("countryiso3code"),
                 "year": int(rec.get("date", 0) or 0),
-                "metric": "Military Expenditure (% GDP)",
-                "value": float(rec["value"]),
-                "unit": "percent",
+                "metric": metric_name or code,
+                "value": float(val),
+                "unit": unit,
             }
         )
     df = pd.DataFrame(rows)
@@ -57,6 +59,94 @@ def wb_milex_percent_gdp(countries="all", start=1990, end=datetime.now().year) -
         df = df.dropna(subset=["value"])
         df["year"] = pd.to_numeric(df["year"], errors="coerce").astype("Int64")
     return df
+
+
+def _owid_grapher_csv_to_df(url: str, value_col: str, metric_name: str, unit: str) -> pd.DataFrame:
+    """
+    Our World in Data 'grapher' CSVs usually have columns: Entity, Code, Year, <value_col>.
+    We reshape that into our standard schema.
+    """
+    try:
+        df = pd.read_csv(url)
+    except Exception:
+        return pd.DataFrame()
+
+    # Normalize common OWID casing
+    # Some files use 'Entity'/'entity', 'Year'/'year'
+    cols = {c.lower(): c for c in df.columns}
+    ent = cols.get("entity") or cols.get("country") or "Entity"
+    yr = cols.get("year") or "Year"
+    val = value_col if value_col in df.columns else cols.get(value_col.lower())
+
+    if ent not in df.columns or yr not in df.columns or val not in df.columns:
+        return pd.DataFrame()
+
+    out = df[[ent, yr, val]].rename(columns={ent: "country", yr: "year", val: "value"})
+    out["source"] = "Our World in Data"
+    out["metric"] = metric_name
+    out["unit"] = unit
+    # tidy types
+    out["year"] = pd.to_numeric(out["year"], errors="coerce").astype("Int64")
+    out["value"] = pd.to_numeric(out["value"], errors="coerce")
+    out = out.dropna(subset=["value"])
+    return out[["source", "country", "year", "metric", "value", "unit"]]
+
+
+# ---------- World Bank: existing ----------
+@cache
+def wb_milex_percent_gdp(countries="all", start=1990, end=datetime.now().year) -> pd.DataFrame:
+    # Military expenditure (% of GDP)
+    return _wb_indicator_to_df(
+        code="MS.MIL.XPND.GD.ZS",
+        countries=countries,
+        start=start,
+        end=end,
+        metric_name="Military Expenditure (% GDP)",
+        unit="percent",
+    )
+
+
+# ---------- World Bank: NEW additions ----------
+@cache
+def wb_milex_current_usd(countries="all", start=1990, end=datetime.now().year) -> pd.DataFrame:
+    # Military expenditure (current US$)
+    # Code verified: MS.MIL.XPND.CD
+    return _wb_indicator_to_df(
+        code="MS.MIL.XPND.CD",
+        countries=countries,
+        start=start,
+        end=end,
+        metric_name="Military Expenditure (current US$)",
+        unit="USD",
+    )
+
+
+@cache
+def wb_armed_forces_total(countries="all", start=1990, end=datetime.now().year) -> pd.DataFrame:
+    # Armed forces personnel, total
+    # Code verified: MS.MIL.TOTL.P1
+    return _wb_indicator_to_df(
+        code="MS.MIL.TOTL.P1",
+        countries=countries,
+        start=start,
+        end=end,
+        metric_name="Armed Forces Personnel (total)",
+        unit="persons",
+    )
+
+
+@cache
+def wb_armed_forces_pct_labor(countries="all", start=1990, end=datetime.now().year) -> pd.DataFrame:
+    # Armed forces personnel (% of total labor force)
+    # Code verified: MS.MIL.TOTL.TF.ZS
+    return _wb_indicator_to_df(
+        code="MS.MIL.TOTL.TF.ZS",
+        countries=countries,
+        start=start,
+        end=end,
+        metric_name="Armed Forces Personnel (% labor force)",
+        unit="percent",
+    )
 
 
 # ---------- UN Peacekeeping: Troop contributors (yearly aggregate) ----------
@@ -80,7 +170,6 @@ def unpk_troop_contributors() -> pd.DataFrame:
     country_col = next((c for c in df.columns if "country" in c), None)
     # Year column
     year_col = next((c for c in df.columns if c == "year"), None)
-
     # Troops column (lots of variants)
     troop_cols = [c for c in df.columns if "troop" in c and "police" not in c]
     troop_col = troop_cols[0] if troop_cols else None
@@ -142,21 +231,53 @@ def usaspending_dod_obligations(start_fy=2016, end_fy=datetime.now().year) -> pd
     return df
 
 
-# ---------- (Optional) NATO: scaffold only; wire an XLS/CSV when available ----------
+# ---------- Our World in Data (NEW) ----------
 @cache
-def nato_defence_spending() -> pd.DataFrame:
+def owid_military_personnel() -> pd.DataFrame:
     """
-    Placeholder — return an empty frame until a structured CSV/XLS is available.
+    Military personnel (OWID grapher). If the endpoint changes, this will just return empty.
     """
-    return pd.DataFrame(columns=["source", "country", "year", "metric", "value", "unit"])
+    url = "https://ourworldindata.org/grapher/military-personnel.csv"
+    # value column name inside CSV is also "military-personnel"
+    return _owid_grapher_csv_to_df(
+        url=url,
+        value_col="military-personnel",
+        metric_name="Military Personnel (OWID)",
+        unit="persons",
+    )
+
+
+@cache
+def owid_mil_exp_share_gdp() -> pd.DataFrame:
+    """
+    Military expenditure as share of GDP (OWID grapher). This file name occasionally changes.
+    Wrapped in try/except to fail gracefully if not available.
+    """
+    url = "https://ourworldindata.org/grapher/military-expenditure-share-gdp.csv"
+    return _owid_grapher_csv_to_df(
+        url=url,
+        value_col="military-expenditure-share-gdp",
+        metric_name="Military Expenditure (% GDP, OWID)",
+        unit="percent",
+    )
 
 
 # ---------- Registry + loader ----------
 REGISTRY = {
+    # World Bank (existing + new)
     "World Bank: mil exp %GDP": wb_milex_percent_gdp,
+    "World Bank: mil exp (USD)": wb_milex_current_usd,
+    "World Bank: armed forces total": wb_armed_forces_total,
+    "World Bank: armed forces % labor": wb_armed_forces_pct_labor,
+
+    # UN & USAspending (existing)
     "UN Peacekeeping: contributors": unpk_troop_contributors,
     "USAspending: DoD obligations": usaspending_dod_obligations,
-    # "NATO: defence spending": nato_defence_spending,
+
+    # OWID (new, optional)
+    "OWID: military personnel": owid_military_personnel,
+    "OWID: mil exp %GDP": owid_mil_exp_share_gdp,
+    # You can add a NATO CSV/XLS source later when you find a stable structured link.
 }
 
 
