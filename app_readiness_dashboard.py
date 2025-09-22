@@ -41,11 +41,32 @@ with st.sidebar:
     )
 
 # Load the combined dataset from data_sources.py
+# Load the combined dataset from data_sources.py
 df = load_selected(choices)
 
+# --- Combined dataset (preview) with filter + unique widget keys ---
 st.subheader("Combined dataset (preview)")
-st.caption("This table shows a mixed sample from all selected sources (not just the United States).")
-st.dataframe(df.head(50), use_container_width=True)
+st.caption("This table mixes rows from all selected sources. Use the filter to focus it.")
+
+src_options = ["All"] + sorted(df["source"].dropna().unique().tolist())
+src_pick = st.selectbox(
+    "Filter preview by source",
+    src_options,
+    index=0,
+    key="preview_source",   # unique key avoids duplicate-ID errors
+)
+preview_df = df if src_pick == "All" else df[df["source"] == src_pick]
+
+show_cols = [c for c in ["source", "country", "year", "metric", "value", "unit"] if c in preview_df.columns]
+rows_to_show = min(50, len(preview_df))
+if rows_to_show:
+    st.dataframe(
+        preview_df.sample(rows_to_show, random_state=42)[show_cols],
+        use_container_width=True
+    )
+else:
+    st.info("No rows for the current selection.")
+
 
 # ---------- Example charts from the combined dataset ----------
 # World Bank: Military Expenditure (% GDP)
