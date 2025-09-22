@@ -35,6 +35,11 @@ with st.sidebar:
             "World Bank: mil exp %GDP",
             "UN Peacekeeping: contributors",
             "USAspending: DoD obligations",
+            "World Bank: mil exp (USD)",
+            "World Bank: armed forces total",
+            "World Bank: armed forces % labor",
+            "OWID: military personnel",
+            "OWID: mil exp %GDP",
         ],
         key="source_picker",
         help="This loads multiple public datasets together for quick exploration."
